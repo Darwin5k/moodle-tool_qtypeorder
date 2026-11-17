@@ -52,7 +52,7 @@ Copy or clone this repository into `admin/tool/qtypeorder` in Moodle 4.5, then v
 *Site administration → Notifications*.
 
 ```bash
-git clone https://github.com/<you>/moodle-tool_qtypeorder.git admin/tool/qtypeorder
+git clone https://github.com/Darwin5k/moodle-tool_qtypeorder.git admin/tool/qtypeorder
 ```
 
 The old qtype_order plugin code is **not** needed. The tool only needs its tables
