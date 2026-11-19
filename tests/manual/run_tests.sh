@@ -2,8 +2,12 @@
 # Runs the whole non-intensive test suite against the local test site.
 # Starts from the pre-migration snapshot each time. Run from anywhere:  testenv/scripts/run_tests.sh
 cd "$(dirname "$0")/.."
+# The site's database name (moodle45, moodle41, ...) is read from its config.php.
+DBNAME=$(sed -n "s/^\$CFG->dbname *= *'\(.*\)';/\1/p" moodle/config.php)
+# The MariaDB client: this folder's, or the 4.5 test environment's next to it.
+MARIADB=./mariadb/bin/mariadb.exe; [ -x $MARIADB ] || MARIADB=../testenv/mariadb/bin/mariadb.exe
 # Local throwaway test database. Override with TESTDB_ARGS="-h... -P... -u... -p...".
-DB="./mariadb/bin/mariadb.exe ${TESTDB_ARGS:--h127.0.0.1 -P3307 -uroot -pmoodletest-root}"
+DB="$MARIADB ${TESTDB_ARGS:--h127.0.0.1 -P3307 -uroot -pmoodletest-root}"
 CLI="./php.sh moodle/admin/tool/qtypeorder/cli/migrate.php"
 PASS=0
 FAIL=0
@@ -13,23 +17,23 @@ expect() { # expect "label" "needle" "haystack"
     case "$3" in *"$2"*) ok "$1" ;; *) bad "$1 (wanted: $2)"; echo "$3" | tail -5 ;; esac
 }
 checksum() {
-    $DB -N moodle45 -e "CHECKSUM TABLE mdl_question, mdl_question_answers, mdl_question_order, mdl_question_order_sub,
+    $DB -N $DBNAME -e "CHECKSUM TABLE mdl_question, mdl_question_answers, mdl_question_order, mdl_question_order_sub,
         mdl_qtype_ordering_options, mdl_question_attempts, mdl_question_attempt_steps, mdl_question_attempt_step_data,
         mdl_question_hints, mdl_files" | awk '{print $2}' | tr '\n' ' '
 }
-ids() { $DB -N moodle45 -e "SELECT GROUP_CONCAT(id ORDER BY id) FROM mdl_question WHERE name IN ($1)"; }
+ids() { $DB -N $DBNAME -e "SELECT GROUP_CONCAT(id ORDER BY id) FROM mdl_question WHERE name IN ($1)"; }
 
 echo "== Reset to snapshot =="
 ./sync.sh > /dev/null
 ./reset.sh | tail -1
-$DB -e "DROP DATABASE IF EXISTS moodle45_snap; CREATE DATABASE moodle45_snap DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-$DB moodle45_snap < snapshot/moodle45.sql
+$DB -e "DROP DATABASE IF EXISTS ${DBNAME}_snap; CREATE DATABASE ${DBNAME}_snap DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+$DB ${DBNAME}_snap < snapshot/$DBNAME.sql
 rm -rf moodledata/tool_qtypeorder
 Q1=$(ids "'q1_basic_hints'" | cut -d, -f1); Q2=$(ids "'q2_eleven'"); Q7=$(ids "'q7_system_bank'")
 Q9=$(ids "'q9_broken_usage'")
 # Fault injection: make the database reject q9's options row, i.e. fail midway through converting q9
 # (after its items have been written), to prove the whole question is rolled back.
-$DB moodle45 <<SQL
+$DB $DBNAME <<SQL
 DELIMITER //
 CREATE TRIGGER inject_q9_failure BEFORE INSERT ON mdl_qtype_ordering_options FOR EACH ROW
 BEGIN
@@ -47,12 +51,16 @@ expect "preview: 10 ready" "ready: 10" "$OUT"
 expect "preview: 1 skipped (one item)" "skipped: 1" "$OUT"
 expect "preview warns about duplicate text" "identical text" "$OUT"
 expect "preview warns about blank item" "blank item" "$OUT"
+if ! $DB -N $DBNAME -e "SHOW COLUMNS FROM mdl_qtype_ordering_options LIKE 'shownumcorrect'" | grep -q .; then
+    # qtype_ordering releases for Moodle 3.x have no "show number correct" setting.
+    expect "preview warns that 'show number correct' will be dropped" "number of correct items" "$OUT"
+fi
 
 echo "== T2 targeting =="
 OUT=$($CLI -q=$Q1,$Q2 -v 2>&1); expect "--questionid list picks 2" "2 question(s)" "$OUT"
 OUT=$($CLI --courseid=2 -v 2>&1); expect "--courseid picks the 10 course/quiz questions (not the system bank one)" "10 question(s)" "$OUT"
 case "$OUT" in *q7_system_bank*) bad "--courseid excluded the system-bank question" ;; *) ok "--courseid excluded the system-bank question" ;; esac
-SYSCAT=$($DB -N moodle45 -e "SELECT id FROM mdl_question_categories WHERE name = 'System bank'")
+SYSCAT=$($DB -N $DBNAME -e "SELECT id FROM mdl_question_categories WHERE name = 'System bank'")
 OUT=$($CLI --categoryid=$SYSCAT -v 2>&1); expect "--categoryid picks only the system-bank question" "q7_system_bank" "$OUT"
 expect "--categoryid count is 1" "1 question(s)" "$OUT"
 OUT=$($CLI -l=3 2>&1); expect "--limit=3" "3 question(s)" "$OUT"
@@ -116,8 +124,12 @@ rm -rf backups && mkdir backups
 MBZ=$(ls backups/*.mbz 2>/dev/null | head -1)
 [ -n "$MBZ" ] && ok "course backup created" || { bad "course backup failed"; tail -5 backups/backup.log; }
 if [ -n "$MBZ" ]; then
-    ./php.sh moodle/admin/cli/restore_backup.php --file="$(cygpath -w "$(pwd)/$MBZ")" --categoryid=1 > backups/restore.log 2>&1
-    NEWCOURSE=$($DB -N moodle45 -e "SELECT MAX(id) FROM mdl_course")
+    if [ -f moodle/admin/cli/restore_backup.php ]; then
+        ./php.sh moodle/admin/cli/restore_backup.php --file="$(cygpath -w "$(pwd)/$MBZ")" --categoryid=1 > backups/restore.log 2>&1
+    else
+        ./php.sh scripts/post_tests.php restore-file "$(cygpath -w "$(pwd)/$MBZ")" > backups/restore.log 2>&1
+    fi
+    NEWCOURSE=$($DB -N $DBNAME -e "SELECT MAX(id) FROM mdl_course")
     [ "$NEWCOURSE" -gt 2 ] && ok "course restored (id $NEWCOURSE)" || { bad "restore failed"; tail -5 backups/restore.log; }
     OUT=$(./php.sh scripts/post_tests.php restored $NEWCOURSE 2>&1); expect "restored attempts render" "failed: 0" "$OUT"
     echo "$OUT" | grep FAIL

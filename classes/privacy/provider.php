@@ -20,7 +20,7 @@ namespace tool_qtypeorder\privacy;
  * Privacy provider: this tool stores no personal data of its own.
  *
  * @package    tool_qtypeorder
- * @copyright  2026 updated for Moodle 4.5
+ * @copyright  2026 updated for Moodle 3.9 to 4.5
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class provider implements \core_privacy\local\metadata\null_provider {

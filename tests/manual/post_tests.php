@@ -4,16 +4,20 @@
 //   ./php.sh scripts/post_tests.php new-attempt          a new student answers the converted quiz A correctly
 //   ./php.sh scripts/post_tests.php regrade-then-undo QID regrade attempts at QID, then check undo is refused
 //   ./php.sh scripts/post_tests.php restored COURSEID    every attempt in a restored course loads and renders
-// The snapshot database (moodle45_snap) must hold the pre-migration snapshot.
+//   ./php.sh scripts/post_tests.php restore-file MBZ     restore a course backup as a new course (Moodle 3.9 has
+//                                                        no admin/cli/restore_backup.php)
+// The snapshot database (e.g. moodle45_snap) must hold the pre-migration snapshot.
 
 define('CLI_SCRIPT', true);
 require(__DIR__ . '/../moodle/config.php');
 require_once($CFG->dirroot . '/question/engine/lib.php');
 require_once($CFG->dirroot . '/mod/quiz/locallib.php');
 require_once($CFG->dirroot . '/user/lib.php');
+require_once(__DIR__ . '/compat.php');
 
-use mod_quiz\quiz_attempt;
 use tool_qtypeorder\migrator;
+
+$attemptclass = testcompat_attempt_class();
 
 $expected = json_decode(file_get_contents(__DIR__ . '/expected.json'), true);
 \core\session\manager::set_user(get_admin());
@@ -80,9 +84,9 @@ switch ($command) {
             'auth' => 'manual', 'confirmed' => 1, 'mnethostid' => $CFG->mnet_localhost_id], false));
         enrol_try_internal_enrol($expected['courseid'], $user->id, $DB->get_field('role', 'id', ['shortname' => 'student']));
         \core\session\manager::set_user($user);
-        $quizobj = \mod_quiz\quiz_settings::create($expected['quizids']['A'], $user->id);
+        $quizobj = testcompat_quiz_object($expected['quizids']['A'], $user->id);
         $attempt = quiz_prepare_and_start_new_attempt($quizobj, 1, null);
-        $attemptobj = quiz_attempt::create($attempt->id);
+        $attemptobj = $attemptclass::create($attempt->id);
         $postdata = ['slots' => implode(',', $attemptobj->get_slots())];
         foreach ($attemptobj->get_slots() as $slot) {
             $qa = $attemptobj->get_question_attempt($slot);
@@ -94,8 +98,8 @@ switch ($command) {
             $postdata[$qa->get_control_field_name('sequencecheck')] = (string) $qa->get_sequence_check_count();
         }
         $attemptobj->process_submitted_actions(time(), false, $postdata);
-        quiz_attempt::create($attempt->id)->process_finish(time(), false);
-        $final = quiz_attempt::create($attempt->id);
+        $attemptclass::create($attempt->id)->process_finish(time(), false);
+        $final = $attemptclass::create($attempt->id);
         $check('new attempt finished with full marks', abs($final->get_sum_marks() - count($final->get_slots())) < 0.0001,
             $final->get_sum_marks() . ' of ' . count($final->get_slots()));
         \core\session\manager::set_user(get_admin());
@@ -120,8 +124,21 @@ switch ($command) {
         $check("regrading changed at least one mark (qtype_ordering grades differently)", $changed > 0);
         $r = $migrator->undo_question($qid);
         $check("undo of $qid refused after regrade", $r->status === 'failed', $r->status);
-        $check("undo refusal explains why", (bool) array_filter($r->errors, fn($e) => strpos($e, 'changed') !== false),
+        $check("undo refusal explains why", (bool) array_filter($r->errors, fn($e) => strpos($e, 'since it was converted') !== false),
             implode('; ', $r->errors));
+        break;
+
+    case 'restore-file':
+        require_once($CFG->dirroot . '/backup/util/includes/restore_includes.php');
+        $tempdir = 'tool_qtypeorder_' . time();
+        get_file_packer('application/vnd.moodle.backup')->extract_to_pathname($argv[2], make_backup_temp_directory($tempdir));
+        $courseid = restore_dbops::create_new_course('Restored', 'restored' . time(), 1);
+        $rc = new restore_controller($tempdir, $courseid, backup::INTERACTIVE_NO, backup::MODE_GENERAL, get_admin()->id,
+            backup::TARGET_NEW_COURSE);
+        $rc->execute_precheck();
+        $rc->execute_plan();
+        $rc->destroy();
+        $check("course restored as $courseid", true);
         break;
 
     case 'restored':
@@ -140,10 +157,7 @@ switch ($command) {
                 $check("restored usage $usageid loads", false, $e->getMessage());
             }
         }
-        $old = $DB->count_records_sql("SELECT COUNT(1) FROM {question} q
-            JOIN {question_versions} qv ON qv.questionid = q.id
-            JOIN {question_bank_entries} qbe ON qbe.id = qv.questionbankentryid
-            JOIN {question_categories} qc ON qc.id = qbe.questioncategoryid
+        $old = $DB->count_records_sql("SELECT COUNT(1) FROM {question} q " . testcompat_category_joins() . "
             JOIN {context} ctx ON ctx.id = qc.contextid
             WHERE q.qtype = 'order' AND ctx.contextlevel = 70 AND ctx.instanceid IN
                 (SELECT id FROM {course_modules} WHERE course = ?)", [$courseid]);

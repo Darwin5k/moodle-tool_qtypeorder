@@ -18,7 +18,7 @@
  * Version details.
  *
  * @package    tool_qtypeorder
- * @copyright  2015 Gordon Bateson, 2026 updated for Moodle 4.5
+ * @copyright  2015 Gordon Bateson, 2026 updated for Moodle 3.9 to 4.5
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -26,7 +26,7 @@ defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'tool_qtypeorder';
 $plugin->maturity  = MATURITY_BETA;
-$plugin->requires  = 2024100700; // Moodle 4.5.
-$plugin->supported = [405, 405];
-$plugin->version   = 2026111701;
-$plugin->release   = '4.5-beta (2026-11-17)';
+$plugin->requires  = 2020061500; // Moodle 3.9.
+$plugin->supported = [39, 405];
+$plugin->version   = 2026111800;
+$plugin->release   = '3.9 to 4.5, beta (2026-11-18)';

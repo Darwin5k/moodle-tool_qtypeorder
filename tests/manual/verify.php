@@ -6,6 +6,7 @@ define('CLI_SCRIPT', true);
 require(__DIR__ . '/../moodle/config.php');
 require_once($CFG->dirroot . '/question/engine/lib.php');
 require_once($CFG->dirroot . '/mod/quiz/locallib.php');
+require_once(__DIR__ . '/compat.php');
 
 $expected = json_decode(file_get_contents(__DIR__ . '/expected.json'), true);
 $salt = $CFG->passwordsaltmain ?? '';
@@ -43,7 +44,7 @@ foreach ($expected['questions'] as $name => $q) {
     $check("$name options row", (bool) $opts);
     if ($opts) {
         $check("$name layout", (int) $opts->layouttype === $q['horizontal'], "layouttype={$opts->layouttype}");
-        $check("$name feedback copied", $opts->correctfeedback === '<p>Well done</p>' && (int) $opts->shownumcorrect === 1);
+        $check("$name feedback copied", $opts->correctfeedback === '<p>Well done</p>' && (!property_exists($opts, 'shownumcorrect') || (int) $opts->shownumcorrect === 1));
     }
     $answers = $DB->get_records('question_answers', ['question' => $qid], 'fraction, id');
     $got = array_values(array_map(fn($a) => $a->answer, $answers));
@@ -53,9 +54,8 @@ foreach ($expected['questions'] as $name => $q) {
     }
     if ($q['image']) {
         $fs = get_file_storage();
-        $contextid = $DB->get_field_sql("SELECT qc.contextid FROM {question_versions} qv
-            JOIN {question_bank_entries} qbe ON qbe.id = qv.questionbankentryid
-            JOIN {question_categories} qc ON qc.id = qbe.questioncategoryid WHERE qv.questionid = ?", [$qid]);
+        $contextid = $DB->get_field_sql("SELECT qc.contextid FROM {question} q " . testcompat_category_joins() .
+            " WHERE q.id = ?", [$qid]);
         $moved = 0;
         foreach ($answers as $a) {
             $moved += count($fs->get_area_files($contextid, 'question', 'answer', $a->id, 'id', false));

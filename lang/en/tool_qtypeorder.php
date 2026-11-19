@@ -18,7 +18,7 @@
  * Strings for component 'tool_qtypeorder', language 'en'.
  *
  * @package    tool_qtypeorder
- * @copyright  2015 Gordon Bateson, 2026 updated for Moodle 4.5
+ * @copyright  2015 Gordon Bateson, 2026 updated for Moodle 3.9 to 4.5
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -58,11 +58,11 @@ $string['dontknow'] = 'I don\'t know';
 $string['errorbackupwrite'] = 'Could not write the undo backup file {$a}';
 $string['errorexistinganswers'] = 'The question already has rows in question_answers.';
 $string['errorexistingoptions'] = 'The question already has a qtype_ordering_options row.';
-$string['errornocategory'] = 'Cannot find the question\'s category (no question_versions / question_bank_entries row).';
+$string['errornocategory'] = 'Cannot find the question\'s category.';
 $string['errornooptions'] = 'The question has no question_order row.';
 $string['errortoofewitems'] = 'The question has {$a} item(s); an ordering question needs at least 2.';
 $string['errorwrongqtype'] = 'The question type is "{$a}", not "order".';
-$string['intro'] = 'This tool converts OLD Ordering questions (qtype_order) to the core Ordering question type (qtype_ordering), including all existing attempts at them.
+$string['intro'] = 'This tool converts OLD Ordering questions (qtype_order) to the standard Ordering question type (qtype_ordering), including all existing attempts at them.
 
 **Take a full backup of the database and moodledata before migrating.**
 
@@ -89,7 +89,7 @@ $string['modeundo'] = 'Undo';
 $string['needsattention'] = 'Questions';
 $string['newresponse'] = 'Converted order';
 $string['nomatch'] = 'No questions matched.';
-$string['noorderingtable'] = 'The database table for the core Ordering question type, qtype_ordering_options, is missing.';
+$string['noorderingtable'] = 'The Ordering question type (qtype_ordering) is not installed: its table qtype_ordering_options is missing. It is part of core from Moodle 4.3. On Moodle 3.9 to 4.2, install the qtype_ordering plugin first.';
 $string['noordertable'] = 'The database tables for the OLD Ordering question type (question_order, question_order_sub) are missing, so there is nothing to convert.';
 $string['noresponse'] = '(no response)';
 $string['nothingchanged'] = 'Nothing has been changed.';
@@ -116,7 +116,7 @@ $string['summary'] = '{$a->questions} question(s): {$a->counts}. Attempts: {$a->
 $string['undobadbackup'] = 'The undo backup file {$a} cannot be read.';
 $string['undomissingfile'] = 'The content of file "{$a}" is no longer in moodledata, so it cannot be restored.';
 $string['undoneedsids'] = 'Undo needs the ids of the questions to put back.';
-$string['undonewattempts'] = 'The question has new attempts since it was converted, so it cannot be put back.';
+$string['undonewattempts'] = 'Attempts at this question have been added, removed or regraded since it was converted, so it cannot be put back.';
 $string['undonewsteps'] = 'Attempts at this question have changed since it was converted (for example regraded or manually graded), so it cannot be put back.';
 $string['undonobackup'] = 'There is no undo backup for this question.';
 $string['undonotconverted'] = 'The question type is "{$a}", not "ordering", so there is nothing to undo.';
@@ -124,4 +124,5 @@ $string['warningbadposition'] = 'An item has a non-numeric or padded position va
 $string['warningblankitems'] = '{$a} blank item(s) will be dropped (qtype_order ignored them too).';
 $string['warningduplicateposition'] = 'Two or more items share the same correct position; they will be ordered by creation order.';
 $string['warningduplicatetext'] = 'Two or more items have identical text. qtype_ordering cannot tell them apart, so grading of student responses for this question may be wrong. Edit the items so each is unique.';
-$string['warningnostate'] = '{$a} attempt(s) had no stored item order; the items were placed in creation order.';
+$string['warningnoshownumcorrect'] = 'The question is set to show the number of correct items, but the installed version of qtype_ordering doesn\'t have that setting. It will be dropped.';
+$string['warningnostate'] ='{$a} attempt(s) had no stored item order; the items were placed in creation order.';

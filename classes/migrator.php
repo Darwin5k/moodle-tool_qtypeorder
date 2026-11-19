@@ -24,8 +24,9 @@ require_once($CFG->dirroot . '/question/engine/lib.php');
 /**
  * Converts legacy qtype_order questions (and their attempts) to core qtype_ordering.
  *
- * Written for Moodle 4.5, where questions reach their category through
- * question_versions -> question_bank_entries, and qtype_ordering is part of core.
+ * Works on Moodle 3.9 to 4.5. From Moodle 4.0, questions reach their category through
+ * question_versions -> question_bank_entries; before that, question.category points straight at it.
+ * qtype_ordering is part of core from Moodle 4.3. Older sites need it installed as an add-on.
  *
  * Old format (qtype_order 2012070400, built on qtype_match):
  *  - question_order          one row per question (horizontal, combined feedback, shownumcorrect).
@@ -53,7 +54,7 @@ require_once($CFG->dirroot . '/question/engine/lib.php');
  *  - undo      put a converted question back, from its undo backup.
  *
  * @package    tool_qtypeorder
- * @copyright  2015 Gordon Bateson, 2026 updated for Moodle 4.5
+ * @copyright  2015 Gordon Bateson, 2026 updated for Moodle 3.9 to 4.5
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class migrator {
@@ -76,6 +77,9 @@ class migrator {
     /** @var string salt that qtype_ordering uses when building item md5 keys. */
     protected $salt;
 
+    /** @var bool true from Moodle 4.0 (question_versions / question_bank_entries), false before. */
+    protected $versionedbank;
+
     /** @var bool whether to collect per-attempt details while converting. */
     protected $collectdetails = false;
 
@@ -86,8 +90,37 @@ class migrator {
      * Constructor.
      */
     public function __construct() {
-        global $CFG;
+        global $CFG, $DB;
         $this->salt = $CFG->passwordsaltmain ?? '';
+        $this->versionedbank = $DB->get_manager()->table_exists('question_versions');
+    }
+
+    /**
+     * SQL joins from question "q" to its category "qc" (and, from Moodle 4.0, its bank entry "qbe").
+     *
+     * @param bool $outer use LEFT JOINs, so questions without a category are kept.
+     * @return string
+     */
+    protected function category_joins(bool $outer = true): string {
+        $join = $outer ? 'LEFT JOIN' : 'JOIN';
+        if ($this->versionedbank) {
+            return "$join {question_versions} qv ON qv.questionid = q.id
+                    $join {question_bank_entries} qbe ON qbe.id = qv.questionbankentryid
+                    $join {question_categories} qc ON qc.id = qbe.questioncategoryid";
+        }
+        // Before Moodle 4.0, each question points straight at its category.
+        return "$join {question_categories} qc ON qc.id = q.category";
+    }
+
+    /**
+     * Whether the installed qtype_ordering has a column. Releases for Moodle 3.x have no "shownumcorrect".
+     *
+     * @param string $column
+     * @return bool
+     */
+    protected function ordering_has_column(string $column): bool {
+        global $DB;
+        return array_key_exists($column, $DB->get_columns('qtype_ordering_options'));
     }
 
     /**
@@ -149,24 +182,32 @@ class migrator {
         if (!empty($filters['courseid'])) {
             // Stored in the course's question banks, or in a module's bank in the course,
             // or used by a quiz (or other module) in the course.
-            $where[] = "((ctx.contextlevel = :lvlcourse AND ctx.instanceid = :course1)
-                      OR (ctx.contextlevel = :lvlmod1 AND ctx.instanceid IN
-                            (SELECT cm1.id FROM {course_modules} cm1 WHERE cm1.course = :course2))
-                      OR qbe.id IN (SELECT qr.questionbankentryid
+            if ($this->versionedbank) {
+                $used = "qbe.id IN (SELECT qr.questionbankentryid
                                       FROM {question_references} qr
                                       JOIN {context} uctx ON uctx.id = qr.usingcontextid AND uctx.contextlevel = :lvlmod2
                                       JOIN {course_modules} cm2 ON cm2.id = uctx.instanceid
-                                     WHERE cm2.course = :course3))";
-            $params += ['lvlcourse' => CONTEXT_COURSE, 'lvlmod1' => CONTEXT_MODULE, 'lvlmod2' => CONTEXT_MODULE,
+                                     WHERE cm2.course = :course3)";
+                $params['lvlmod2'] = CONTEXT_MODULE;
+            } else {
+                // Before Moodle 4.0, quiz slots point straight at questions.
+                $used = "q.id IN (SELECT qs.questionid
+                                    FROM {quiz_slots} qs
+                                    JOIN {quiz} qz ON qz.id = qs.quizid
+                                   WHERE qz.course = :course3)";
+            }
+            $where[] = "((ctx.contextlevel = :lvlcourse AND ctx.instanceid = :course1)
+                      OR (ctx.contextlevel = :lvlmod1 AND ctx.instanceid IN
+                            (SELECT cm1.id FROM {course_modules} cm1 WHERE cm1.course = :course2))
+                      OR $used)";
+            $params += ['lvlcourse' => CONTEXT_COURSE, 'lvlmod1' => CONTEXT_MODULE,
                 'course1' => $filters['courseid'], 'course2' => $filters['courseid'], 'course3' => $filters['courseid']];
         }
 
         $sql = "SELECT DISTINCT q.id
                   FROM {question} q
                        $joins
-             LEFT JOIN {question_versions} qv ON qv.questionid = q.id
-             LEFT JOIN {question_bank_entries} qbe ON qbe.id = qv.questionbankentryid
-             LEFT JOIN {question_categories} qc ON qc.id = qbe.questioncategoryid
+                       {$this->category_joins()}
              LEFT JOIN {context} ctx ON ctx.id = qc.contextid
                  WHERE " . implode(' AND ', $where) . "
               ORDER BY q.id";
@@ -421,9 +462,7 @@ class migrator {
 
         $sql = "SELECT q.id, q.name, q.qtype, qc.contextid
                   FROM {question} q
-             LEFT JOIN {question_versions} qv ON qv.questionid = q.id
-             LEFT JOIN {question_bank_entries} qbe ON qbe.id = qv.questionbankentryid
-             LEFT JOIN {question_categories} qc ON qc.id = qbe.questioncategoryid
+                       {$this->category_joins()}
                  WHERE q.id = :id";
         $question = $DB->get_record_sql($sql, ['id' => $questionid], MUST_EXIST);
 
@@ -497,13 +536,16 @@ class migrator {
         }
 
         // Non-blocking problems.
-        $md5keys = array_count_values(array_map(fn($item) => $item->md5key, $data->items));
+        $md5keys = array_count_values(array_column($data->items, 'md5key'));
         if (max($md5keys ?: [0]) > 1) {
             $result->warnings[] = get_string('warningduplicatetext', 'tool_qtypeorder');
         }
-        $positions = array_count_values(array_map(fn($item) => $item->position, $data->items));
+        $positions = array_count_values(array_column($data->items, 'position'));
         if (max($positions ?: [0]) > 1) {
             $result->warnings[] = get_string('warningduplicateposition', 'tool_qtypeorder');
+        }
+        if (!empty($data->options->shownumcorrect) && !$this->ordering_has_column('shownumcorrect')) {
+            $result->warnings[] = get_string('warningnoshownumcorrect', 'tool_qtypeorder');
         }
         foreach ($data->items as $item) {
             if ((string) $item->position !== trim($item->answertext)) {
@@ -711,7 +753,7 @@ class migrator {
             }
 
             $order = $this->decode_response($data, $stemorder, $choiceorder, $responserows);
-            $DB->delete_records_list('question_attempt_step_data', 'id', array_map(fn($row) => $row->id, $responserows));
+            $DB->delete_records_list('question_attempt_step_data', 'id', array_column($responserows, 'id'));
 
             $value = null;
             if ($order !== null || $dontknow) {
@@ -785,7 +827,9 @@ class migrator {
             return null;
         }
         // Order by the position picked; ties (two items given the same position) keep the order shown.
-        usort($placed, fn($a, $b) => [$a[0], $a[1]] <=> [$b[0], $b[1]]);
+        usort($placed, function($a, $b) {
+            return [$a[0], $a[1]] <=> [$b[0], $b[1]];
+        });
         return array_merge(array_column($placed, 2), $unplaced);
     }
 
@@ -852,8 +896,9 @@ class migrator {
             'userid' => (int) $step->userid,
             'old' => implode('; ', $old) . ($dontknow ? ' [' . get_string('dontknow', 'tool_qtypeorder') . ']' : ''),
             'new' => $order === null ? get_string('noresponse', 'tool_qtypeorder') :
-                implode('; ', array_map(fn($subid) => $this->item_label($data->items[$subid]), array_values(array_filter(
-                    $order, fn($subid) => isset($data->items[$subid]))))),
+                implode('; ', array_map(function($subid) use ($data) {
+                        return $this->item_label($data->items[$subid]);
+                    }, array_values(array_intersect($order, array_keys($data->items))))),
         ];
     }
 
@@ -916,7 +961,9 @@ class migrator {
                 $errors[] = get_string('checkmore', 'tool_qtypeorder');
             }
         };
-        $str = fn($id, $a = null) => get_string('check' . $id, 'tool_qtypeorder', $a);
+        $str = function($id, $a = null) {
+            return get_string('check' . $id, 'tool_qtypeorder', $a);
+        };
 
         // The definition.
         $qtype = $DB->get_field('question', 'qtype', ['id' => $questionid]);
@@ -934,7 +981,7 @@ class migrator {
         if (count($answers) < 2) {
             $add($str('fewanswers', count($answers)));
         }
-        $fractions = array_map(fn($a) => (float) $a->fraction, array_values($answers));
+        $fractions = array_map('floatval', array_column($answers, 'fraction'));
         if ($fractions !== array_map('floatval', range(1, max(1, count($answers))))) {
             $add($str('fractions'));
         }
@@ -1157,7 +1204,7 @@ class migrator {
         }
         $attemptids = array_map('intval', array_keys($DB->get_records('question_attempts', ['questionid' => $questionid],
             'id', 'id')));
-        $backupattemptids = array_map(fn($a) => (int) $a->id, $backup->question_attempts);
+        $backupattemptids = array_map('intval', array_column($backup->question_attempts, 'id'));
         sort($backupattemptids);
         if ($attemptids !== $backupattemptids) {
             $result->errors[] = get_string('undonewattempts', 'tool_qtypeorder');
@@ -1200,10 +1247,9 @@ class migrator {
 
             // Remove the converted definition.
             $contextid = $DB->get_field_sql("SELECT qc.contextid
-                  FROM {question_versions} qv
-                  JOIN {question_bank_entries} qbe ON qbe.id = qv.questionbankentryid
-                  JOIN {question_categories} qc ON qc.id = qbe.questioncategoryid
-                 WHERE qv.questionid = ?", [$questionid]);
+                  FROM {question} q
+                       {$this->category_joins(false)}
+                 WHERE q.id = ?", [$questionid]);
             foreach ($DB->get_records('question_answers', ['question' => $questionid], 'id', 'id') as $answer) {
                 if ($contextid) {
                     $fs->delete_area_files($contextid, 'question', 'answer', $answer->id);

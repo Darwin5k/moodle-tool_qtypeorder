@@ -18,7 +18,7 @@
  * Admin page: preview, simulate, migrate, check and undo qtype_order -> qtype_ordering conversions.
  *
  * @package    tool_qtypeorder
- * @copyright  2015 Gordon Bateson, 2026 updated for Moodle 4.5
+ * @copyright  2015 Gordon Bateson, 2026 updated for Moodle 3.9 to 4.5
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
@@ -105,8 +105,12 @@ if ($data = $form->get_data()) {
             continue;
         }
         $messages = array_merge(
-            array_map(fn($e) => html_writer::div(s($e), 'text-danger'), $r->errors),
-            array_map(fn($w) => html_writer::div(s($w), 'text-warning'), $r->warnings)
+            array_map(function($e) {
+                return html_writer::div(s($e), 'text-danger');
+            }, $r->errors),
+            array_map(function($w) {
+                return html_writer::div(s($w), 'text-warning');
+            }, $r->warnings)
         );
         $table->data[] = [
             $r->questionid, s($r->name), $r->items, $r->attempts,

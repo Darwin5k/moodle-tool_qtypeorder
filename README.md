@@ -1,12 +1,30 @@
-# Migrate Ordering questions (tool_qtypeorder) for Moodle 4.5
+# Migrate Ordering questions (tool_qtypeorder) for Moodle 3.9 to 4.5
 
 An admin tool that converts legacy **qtype_order** questions, and every existing attempt
-at them, to the core **qtype_ordering** question type. It is tested against data in the
+at them, to the **qtype_ordering** question type. It is tested against data in the
 format of qtype_order `2012070400`.
 
 This is a fork of [gbateson/moodle-tool_qtypeorder](https://github.com/gbateson/moodle-tool_qtypeorder)
-by Gordon Bateson. The original targeted Moodle 2.x, and this fork brings it up to date for Moodle 4.5.
+by Gordon Bateson. The original targeted Moodle 2.x, and this fork brings it up to date for Moodle 3.9 to 4.5.
 The original fails on Moodle 4.x with `Unknown column 'q.category'`.
+
+## Supported versions
+
+| Moodle | qtype_ordering | Tested |
+|---|---|---|
+| 3.9 LTS | add-on plugin, install it first | yes: Moodle 3.9.25, PHP 7.4, qtype_ordering 2022070806 |
+| 3.10, 3.11, 4.0 | add-on plugin, install it first | no |
+| 4.1 LTS | add-on plugin, install it first | yes: Moodle 4.1.22+, PHP 8.1, qtype_ordering 2023092910 |
+| 4.2 | add-on plugin, install it first | no |
+| 4.3, 4.4 | part of core | no |
+| 4.5 LTS | part of core | yes: Moodle 4.5.16+, PHP 8.3 |
+
+The untested versions run the same code as the tested version next to them. The tool's code
+runs on PHP 7.2 and later, so any PHP version the Moodle release supports is fine.
+
+The tool checks which question bank layout the site has: from Moodle 4.0, questions reach their
+category through `question_versions` and `question_bank_entries`, and before that through
+`question.category`.
 
 ## Features
 
@@ -48,7 +66,10 @@ The original fails on Moodle 4.x with `Unknown column 'q.category'`.
 
 ## Install
 
-Copy or clone this repository into `admin/tool/qtypeorder` in Moodle 4.5, then visit
+On Moodle 3.9 to 4.2, first install the
+[qtype_ordering plugin](https://moodle.org/plugins/qtype_ordering) (the tool refuses to run without it).
+
+Copy or clone this repository into `admin/tool/qtypeorder`, then visit
 *Site administration → Notifications*.
 
 ```bash
@@ -89,17 +110,20 @@ attempt data, so delete the folder once you're happy with the migration.
 - Students who left items unplaced, or gave two items the same position, get those items placed
   after the placed items, in the order they were shown. An "I don't know" response keeps the order shown.
 - **Identical item text** can't be told apart by qtype_ordering. These questions are flagged.
-- **Course backups made before the migration** still contain qtype_order data, which Moodle 4.5
-  can't restore. Restore them on a site that still has qtype_order, migrate there, and back up again.
+- qtype_ordering releases for Moodle 3.x have no **"show number correct"** setting, so on those sites
+  the setting is dropped, with a warning. Everything else carries over.
+- **Course backups made before the migration** still contain qtype_order data. Moodle 4.x can't
+  restore it. Restore such a backup on a site that still has qtype_order, migrate there, and back up again.
 - Random questions that filter by question type "order" (rare) need editing by hand.
 
 ## Testing
 
 `tests/manual/` has the test harness used during development. It's excluded from release zips.
-It needs a local, throwaway Moodle 4.5 site, because it creates courses, users and attempts. See
+It needs a local, throwaway Moodle site, because it creates courses, users and attempts. See
 [tests/manual/README.md](tests/manual/README.md).
 
-The suite builds 11 legacy questions with 43 attempts and covers the following:
+The suite passes in full on Moodle 3.9, 4.1 and 4.5, with MariaDB 11.4. It builds 11 legacy questions
+with 43 attempts and covers the following:
 - **Quiz modes:** deferred feedback, interactive with hints and a second try, adaptive.
 - **Attempt states:** in-progress attempts with autosaves, question bank previews.
 - **Questions:** multiple versions, random slots, course and system banks, images, horizontal layout.
@@ -118,6 +142,6 @@ The suite builds 11 legacy questions with 43 attempts and covers the following:
 
 - The original tool is © 2015 Gordon Bateson. Commissioned by Prof. Don Hinkelman and sponsored
   by Sapporo Gakuin University. File migration was contributed by Vadimonus.
-- The Moodle 4.5 update dates from 2026.
+- The update for Moodle 3.9 to 4.5 dates from 2026.
 
 Licensed under the GNU GPL v3 or later, like Moodle.

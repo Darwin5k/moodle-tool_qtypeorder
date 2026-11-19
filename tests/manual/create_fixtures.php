@@ -1,5 +1,5 @@
 <?php
-// Creates legacy qtype_order (2012070400 format) questions and attempts on a Moodle 4.5 TEST site.
+// Creates legacy qtype_order (2012070400 format) questions and attempts on a Moodle 3.9, 4.1 or 4.5 TEST site.
 // Usage: ./php.sh scripts/create_fixtures.php   (run from testenv)
 // Writes scripts/expected.json for verify.php and post_tests.php.
 //
@@ -12,9 +12,9 @@ require(__DIR__ . '/../moodle/config.php');
 require_once($CFG->libdir . '/clilib.php');
 require_once($CFG->libdir . '/testing/classes/util.php');
 require_once($CFG->dirroot . '/mod/quiz/locallib.php');
+require_once(__DIR__ . '/compat.php');
 
-use mod_quiz\quiz_attempt;
-use mod_quiz\quiz_settings;
+$attemptclass = testcompat_attempt_class();
 
 if (empty($CFG->wwwroot) || strpos($CFG->wwwroot, 'localhost') === false) {
     cli_error('Refusing to run: this script is for the local test site only.');
@@ -91,10 +91,12 @@ function save_shortanswer(stdClass $cat, string $name, ?int $existingid = null, 
         'questiontext' => ['text' => "<p>Put these in order ($name)</p>", 'format' => FORMAT_HTML],
         'generalfeedback' => ['text' => '', 'format' => FORMAT_HTML],
         'defaultmark' => 1, 'penalty' => 0.3333333, 'usecase' => 0,
-        'status' => \core_question\local\bank\question_version_status::QUESTION_STATUS_READY,
         'answer' => ['frog', '*'], 'fraction' => ['1.0', '0.0'],
         'feedback' => [['text' => '', 'format' => FORMAT_HTML], ['text' => '', 'format' => FORMAT_HTML]],
     ];
+    if (class_exists('\core_question\local\bank\question_version_status')) {
+        $form->status = \core_question\local\bank\question_version_status::QUESTION_STATUS_READY;
+    }
     if ($hints) {
         $form->hint = [['text' => '<p>Hint one</p>', 'format' => FORMAT_HTML], ['text' => '<p>Hint two</p>', 'format' => FORMAT_HTML]];
     }
@@ -160,15 +162,13 @@ foreach ($specs as $name => $spec) {
 foreach (['q1_basic_hints', 'q2_eleven', 'q3_files_horizontal', 'q6_course_bank', 'q8_rich_text'] as $name) {
     quiz_add_quiz_question($questions[$name]->q->id, $quizzes['A']);
 }
-$structure = quiz_settings::create($quizzes['A']->id)->get_structure();
-$structure->add_random_questions(0, 1, ['filter' => ['category' => ['jointype' => 1, 'values' => [$cats['random']->id],
-    'filteroptions' => ['includesubcategories' => false]]]]);
+testcompat_add_random_question($quizzes['A'], $cats['random']->id);
 $randomslot = 6;
 quiz_add_quiz_question($questions['q1_basic_hints']->q->id, $quizzes['B']);
 quiz_add_quiz_question($questions['q3_files_horizontal']->q->id, $quizzes['B']);
 quiz_add_quiz_question($questions['q2_eleven']->q->id, $quizzes['C']);
 foreach ($quizzes as $quiz) {
-    quiz_settings::create($quiz->id)->get_grade_calculator()->recompute_quiz_sumgrades();
+    testcompat_recompute_sumgrades($quiz);
 }
 
 // Attempt helpers.
@@ -179,7 +179,7 @@ $students = [];
 /**
  * Simulate the browser POST for some slots and process it.
  */
-function submit_slots(quiz_attempt $attemptobj, array $answers, array $behaviourvars = []): void {
+function submit_slots($attemptobj, array $answers, array $behaviourvars = []): void {
     $postdata = ['slots' => implode(',', array_keys($answers))];
     foreach ($answers as $slot => $answer) {
         $qa = $attemptobj->get_question_attempt($slot);
@@ -211,7 +211,7 @@ foreach (['correct', 'reversed', 'partialdup', 'dontknow', 'unanswered', 'inprog
     $user = $student($scenario);
     \core\session\manager::set_user($user);
     $attempt = $quizgen->create_attempt($quizzes['A']->id, $user->id, [$randomslot => $questions['q10_random']->q->id]);
-    $attemptobj = quiz_attempt::create($attempt->id);
+    $attemptobj = $attemptclass::create($attempt->id);
     if ($scenario !== 'unanswered') {
         submit_slots($attemptobj, array_fill_keys($attemptobj->get_slots(), 'frog'));
     }
@@ -222,7 +222,7 @@ foreach (['correct', 'reversed', 'partialdup', 'dontknow', 'unanswered', 'inprog
             $qa->get_control_field_name('sequencecheck') => (string) $qa->get_sequence_check_count()]);
         question_engine::save_questions_usage_by_activity($quba);
     } else {
-        quiz_attempt::create($attempt->id)->process_finish(time(), false);
+        $attemptclass::create($attempt->id)->process_finish(time(), false);
     }
     \core\session\manager::set_user(get_admin());
     if ($scenario === 'correct') {
@@ -247,11 +247,11 @@ foreach (['correct', 'reversed', 'partialdup', 'dontknow', 'unanswered', 'inprog
 $user = $student('interactive');
 \core\session\manager::set_user($user);
 $attempt = $quizgen->create_attempt($quizzes['B']->id, $user->id);
-submit_slots(quiz_attempt::create($attempt->id), [1 => 'toad'], ['submit' => 1]);
-submit_slots(quiz_attempt::create($attempt->id), [1 => null], ['tryagain' => 1]);
-submit_slots(quiz_attempt::create($attempt->id), [1 => 'frog'], ['submit' => 1]);
-submit_slots(quiz_attempt::create($attempt->id), [2 => 'frog'], ['submit' => 1]);
-quiz_attempt::create($attempt->id)->process_finish(time(), false);
+submit_slots($attemptclass::create($attempt->id), [1 => 'toad'], ['submit' => 1]);
+submit_slots($attemptclass::create($attempt->id), [1 => null], ['tryagain' => 1]);
+submit_slots($attemptclass::create($attempt->id), [1 => 'frog'], ['submit' => 1]);
+submit_slots($attemptclass::create($attempt->id), [2 => 'frog'], ['submit' => 1]);
+$attemptclass::create($attempt->id)->process_finish(time(), false);
 \core\session\manager::set_user(get_admin());
 $plan[$qaid($attempt->uniqueid, 1)] = ['question' => 'q1_basic_hints', 'scenarios' => ['reversed', 'correct'],
     'finished' => false, 'label' => 'quizB/interactive'];
@@ -263,9 +263,9 @@ $marks[$attempt->uniqueid] = null;
 $user = $student('adaptive');
 \core\session\manager::set_user($user);
 $attempt = $quizgen->create_attempt($quizzes['C']->id, $user->id);
-submit_slots(quiz_attempt::create($attempt->id), [1 => 'toad'], ['submit' => 1]);
-submit_slots(quiz_attempt::create($attempt->id), [1 => 'frog'], ['submit' => 1]);
-quiz_attempt::create($attempt->id)->process_finish(time(), false);
+submit_slots($attemptclass::create($attempt->id), [1 => 'toad'], ['submit' => 1]);
+submit_slots($attemptclass::create($attempt->id), [1 => 'frog'], ['submit' => 1]);
+$attemptclass::create($attempt->id)->process_finish(time(), false);
 \core\session\manager::set_user(get_admin());
 $plan[$qaid($attempt->uniqueid, 1)] = ['question' => 'q2_eleven', 'scenarios' => ['partialdup', 'correct'],
     'finished' => true, 'label' => 'quizC/adaptive'];
@@ -291,7 +291,9 @@ $preview('q7_system_bank', 'correct');
 $brokenusage = $preview('q9_broken_usage', 'correct');
 
 // A second version of q1 (as if a teacher edited it), with its own items and a preview attempt.
-$v2 = save_shortanswer($cats['quizA'], 'q1_basic_hints', $questions['q1_basic_hints']->q->id, true);
+// Moodle 3.9 has no question versions, so there it is a separate question with the same name.
+$v2 = save_shortanswer($cats['quizA'], 'q1_basic_hints',
+    testcompat_versioned_bank() ? $questions['q1_basic_hints']->q->id : null, true);
 $questions['q1v2'] = (object) ['q' => $v2, 'cat' => $cats['quizA'], 'spec' => ['cat' => 'quizA'],
     'subs' => add_subs($v2, $cats['quizA'], $simple('q1v2', [2, 4, 1, 3]))];
 $preview('q1v2', 'partialdup', $v2->id);

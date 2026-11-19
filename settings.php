@@ -18,7 +18,7 @@
  * Admin menu entry.
  *
  * @package    tool_qtypeorder
- * @copyright  2015 Gordon Bateson, 2026 updated for Moodle 4.5
+ * @copyright  2015 Gordon Bateson, 2026 updated for Moodle 3.9 to 4.5
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
